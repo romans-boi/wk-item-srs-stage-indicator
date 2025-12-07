@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         WaniKani Item SRS Stage Indicator
 // @namespace    http://tampermonkey.net/
-// @version      1.2.2
-// @description  Displays the exact item SRS stage (Apprentice 3, Guru 1, etc.), both before and after completing the review for the item.
+// @version      1.2.3
+// @description  Displays the exact item SRS stage (Apprentice IV, Guru I, etc.), both before and after completing a review for the item.
 // @author       romans-boi
 // @match        https://www.wanikani.com/*
 // @run-at       document-end
