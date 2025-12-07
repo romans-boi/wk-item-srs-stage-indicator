@@ -4,6 +4,7 @@
 // @version      1.2.3
 // @description  Displays the exact item SRS stage (Apprentice IV, Guru I, etc.), both before and after completing a review for the item.
 // @author       romans-boi
+// @license      MIT
 // @match        https://www.wanikani.com/*
 // @run-at       document-end
 // @grant        none
