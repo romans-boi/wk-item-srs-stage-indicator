@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WaniKani Item SRS Stage Indicator
 // @namespace    http://tampermonkey.net/
-// @version      1.2.0
+// @version      1.2.1
 // @description  Displays the exact item SRS stage (Apprentice 3, Guru 1, etc.), both before and after completing the review for the item.
 // @author       romans-boi
 // @match        https://www.wanikani.com/*
@@ -37,6 +37,12 @@
     "Enlightened",
     "Burned",
   ];
+
+  const TEXT_COLOR = new Map([
+    ["Radical", "#a1dfff"],
+    ["Kanji", "#ffc5ec"],
+    ["Vocabulary", "#edcaff"],
+  ]);
 
   const SUBJECT_IDS_WITH_SRS_TARGET = "subjectIdsWithSRS";
 
@@ -140,29 +146,37 @@
       )[1];
       const currentSrsStageName = CORRECTED_NAMES[currentItemSrsIndex];
 
+      const textColour = TEXT_COLOR.get(subject.type);
+
       const currentSrsTextDiv = document.querySelector(
         `div[class='character-header__current-srs-text']`
       );
 
       // If doesn't exist, create a new container with the text element, otherwise change text.
       if (currentSrsTextDiv == undefined) {
-        const currentSrsContainerHtml = `
-                    <div class="character-header__current-srs-container" data-hidden=false>
-                        <div class="character-header__current-srs-content">
-                            <div class="character-header__current-srs-text">${currentSrsStageName}</div>
-                        </div>
-                    </div>
-                `;
+        const container = document.createElement("div");
+        container.className = "character-header__current-srs-container";
+        container.dataset.hidden = "false";
+
+        const content = document.createElement("div");
+        content.className = "character-header__current-srs-content";
+
+        const text = document.createElement("div");
+        text.className = "character-header__current-srs-text";
+        text.textContent = currentSrsStageName;
+        text.style.color = textColour;
+
+        content.appendChild(text);
+        container.appendChild(content);
 
         const characterHeader = document.querySelector(
           `div[class='character-header__content']`
         );
-        characterHeader.insertAdjacentHTML(
-          "beforeend",
-          currentSrsContainerHtml
-        );
+
+        characterHeader.appendChild(container);
       } else {
         currentSrsTextDiv.textContent = currentSrsStageName;
+        currentSrsTextDiv.style.color = textColour;
       }
     }
   }
@@ -183,7 +197,7 @@
                 width:100%;
                 display:flex;
                 justify-content:center;
-                opacity:1;
+                opacity:0.8;
                 pointer-events:none;
                 transform:translateY(0);
                 transition:none
@@ -191,7 +205,7 @@
 
             .character-header__current-srs-container[data-hidden=true] {
                 opacity:0;
-                transform:translateY(10px);
+                transform:translateY(-10px);
                 transition:all .5s ease-in
             }
 
@@ -223,7 +237,7 @@
             }
 
             .character-header__current-srs-container .character-header__current-srs-content {
-                background-color: rgb(60, 60, 60);
+                background-color: rgba(65, 65, 65, 1);
                 color: rgb(144, 164, 174);
             }
         `;
