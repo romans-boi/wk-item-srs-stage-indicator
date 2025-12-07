@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WaniKani Item SRS Stage Indicator
 // @namespace    http://tampermonkey.net/
-// @version      1.0.0
+// @version      1.1.0
 // @description  Displays the exact item SRS stage (Apprentice 3, Guru 1, etc.), both before and after completing the review for the item.
 // @author       romans-boi
 // @match        https://www.wanikani.com/subjects/review
@@ -10,34 +10,41 @@
 // ==/UserScript==
 
 (async function () {
-    /* global Stimulus */
-
     // Correct namings for the stages
-    const currentNames = ["Unlocked", "Apprentice", "Apprentice", "Apprentice", "Apprentice", "Guru", "Guru", "Master", "Enlightened", "Burned"];
-    const correctedNames = ["Unlocked", "Apprentice I", "Apprentice II", "Apprentice III", "Apprentice IV", "Guru I", "Guru II", "Master", "Enlightened", "Burned"];
+    const CURRENT_NAMES = ["Unlocked", "Apprentice", "Apprentice", "Apprentice", "Apprentice", "Guru", "Guru", "Master", "Enlightened", "Burned"];
+    const CORRECTED_NAMES = ["Unlocked", "Apprentice I", "Apprentice II", "Apprentice III", "Apprentice IV", "Guru I", "Guru II", "Master", "Enlightened", "Burned"];
 
-    let srsQueueController;
+    const SUBJECT_IDS_WITH_SRS_TARGET = "subjectIdsWithSRS";
+    const SUBJECTS_TARGET = "subjects";
 
-    window.addEventListener("turbo:load", () => {
-        console.log("Turbo page finished loading");
-        init();
-    });
+    let queueElement;
+    let parentElement;
+    let clonedQueueElement;
+
+    init();
 
     function init() {
+        // As recommended by Tofugu Scott: https://community.wanikani.com/t/updates-to-lessons-reviews-and-extra-study/60912/28
+        queueElement = document.getElementById('quiz-queue');
+        parentElement = queueElement.parentElement;
+        queueElement.remove();
+        clonedQueueElement = queueElement.cloneNode(true);
+
         addStyle();
         replaceSrsStageNames();
 
-        srsQueueController = getController('quiz-queue');
-        addDidChangeSrsListener();
-        addNextQuestionEventListener();
+        addDidChangeSrsListener()
+        addNextQuestionEventListener()
+
+        parentElement.appendChild(clonedQueueElement)
     }
 
     function replaceSrsStageNames() {
         // Get the element that holds the SRS names, and replace them with the corrected ones.
-        const srsStagesScript = document.getElementById('quiz-queue').querySelector(`[data-quiz-queue-target="subjectIdsWithSRS"]`);
-        const srsStagesRaw = srsStagesScript.childNodes[0].data;
-        const srsStagesCorrectedRaw = srsStagesRaw.replaceAll(JSON.stringify(currentNames), JSON.stringify(correctedNames));
-        srsStagesScript.textContent = srsStagesCorrectedRaw;
+        const srsStagesElement = getQuizQueueTarget(SUBJECT_IDS_WITH_SRS_TARGET);
+        const srsStagesText = srsStagesElement.textContent;
+        const srsStagesCorrectedText = srsStagesText.replaceAll(JSON.stringify(CURRENT_NAMES), JSON.stringify(CORRECTED_NAMES));
+        srsStagesElement.textContent = srsStagesCorrectedText;
     }
 
     function showCurrentSrsContainer() {
@@ -54,22 +61,37 @@
 
     function addNextQuestionEventListener() {
         window.addEventListener("willShowNextQuestion", () => {
-            setCurrentSrsText();
+            onNextQuestion();
         });
-        setCurrentSrsText();
+        onNextQuestion();
 
-        function setCurrentSrsText() {
-            const currentItemId = srsQueueController.quizQueue.currentItem.id;
-            const subjectIdSrsMap = srsQueueController.quizQueue.srsManager.subjectIdSRSMap;
-            const currentSrsStatusName = correctedNames[subjectIdSrsMap.get(currentItemId).srsPosition];
+        function onNextQuestion() {
+            setCurrentSrsStageText();
+            showCurrentSrsContainer();
+        }
+
+        function setCurrentSrsStageText() {
+            // Get SRS stages config
+            const srsStagesJson = JSON.parse(getQuizQueueTarget(SUBJECT_IDS_WITH_SRS_TARGET).textContent);
+            const subjectIdSrsList = srsStagesJson.subject_ids_with_srs_info;
+
+            // Get current queue config
+            const queueJson = JSON.parse(getQuizQueueTarget(SUBJECTS_TARGET).textContent);
+            const currentItemId = queueJson[0].id;
+
+            // The tuple we get for a subject looks like this `[id, index, X]` where X is pointing to which array of SRS names to use within
+            // srs_ids_stage_names, but from what I can tell... it doesn't matter? So I just use the local corrected names array.
+            const currentItemSrsIndex = subjectIdSrsList.find((subjectSrsInfo) => subjectSrsInfo[0] == currentItemId)[1];
+            const currentSrsStageName = CORRECTED_NAMES[currentItemSrsIndex];
 
             const currentSrsTextDiv = document.querySelector(`div[class='character-header__current-srs-text']`);
 
+            // If doesn't exist, create a new container with the text element, otherwise change text.
             if (currentSrsTextDiv == undefined) {
                 const currentSrsContainerHtml = `
                     <div class="character-header__current-srs-container" data-hidden=false>
                         <div class="character-header__current-srs-content">
-                            <div class="character-header__current-srs-text">${currentSrsStatusName}</div>
+                            <div class="character-header__current-srs-text">${currentSrsStageName}</div>
                         </div>
                     </div>
                 `;
@@ -77,15 +99,13 @@
                 const characterHeader = document.querySelector(`div[class='character-header__content']`);
                 characterHeader.insertAdjacentHTML('beforeend', currentSrsContainerHtml);
             } else {
-                currentSrsTextDiv.textContent = currentSrsStatusName;
+                currentSrsTextDiv.textContent = currentSrsStageName;
             }
-
-            showCurrentSrsContainer();
         }
     }
 
-    function getController(name) {
-        return Stimulus.getControllerForElementAndIdentifier(document.querySelector(`[data-controller~="${name}"]`), name);
+    function getQuizQueueTarget(target) {
+        return clonedQueueElement.querySelector(`[data-quiz-queue-target="${target}"]`)
     }
 
     function addStyle() {
