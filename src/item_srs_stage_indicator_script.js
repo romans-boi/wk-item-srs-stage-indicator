@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WaniKani Item SRS Stage Indicator
 // @namespace    http://tampermonkey.net/
-// @version      1.2.3
+// @version      1.3.0
 // @description  Displays the exact item SRS stage (Apprentice IV, Guru I, etc.), both before and after completing a review for the item.
 // @author       romans-boi
 // @license      MIT
@@ -11,7 +11,6 @@
 // ==/UserScript==
 
 (async function () {
-  // Correct namings for the stages
   const CURRENT_NAMES = [
     "Unlocked",
     "Apprentice",
@@ -36,6 +35,17 @@
     "Enlightened",
     "Burned",
   ];
+
+  const STAGE_TO_ICON_MAP = new Map([
+    ["Apprentice I", "#wk-icon__srs-apprentice1"],
+    ["Apprentice II", "#wk-icon__srs-apprentice2"],
+    ["Apprentice III", "#wk-icon__srs-apprentice3"],
+    ["Apprentice IV", "#wk-icon__srs-apprentice4"],
+    ["Guru I", "#wk-icon__srs-guru5"],
+    ["Guru II", "#wk-icon__srs-guru6"],
+    ["Master", "#wk-icon__srs-master"],
+    ["Enlightened", "#wk-icon__srs-enlightened"],
+  ]);
 
   const TEXT_COLOR = new Map([
     ["Radical", "#a1dfff"],
@@ -146,25 +156,50 @@
       const currentSrsStageName = CORRECTED_NAMES[currentItemSrsIndex];
 
       const textColour = TEXT_COLOR.get(subject.type);
+      const iconHtml = getIconHtmlFor(currentSrsStageName);
 
-      const currentSrsTextDiv = document.querySelector(
-        `div[class='character-header__current-srs-text']`
+      const currentSrsContentDiv = document.querySelector(
+        `div[class='character-header__current-srs-content']`
       );
 
-      // If doesn't exist, create a new container with the text element, otherwise change text.
-      if (currentSrsTextDiv == undefined) {
+      // If doesn't exist, create a new container with the icon and text element, otherwise change icon and text.
+      if (currentSrsContentDiv == undefined) {
+        appendNewCurrentSrsContainer(textColour, iconHtml, currentSrsStageName);
+      } else {
+        modifyExistingSrsContainer(
+          currentSrsContentDiv,
+          textColour,
+          iconHtml,
+          currentSrsStageName
+        );
+      }
+
+      function appendNewCurrentSrsContainer(
+        textColour,
+        iconHtml,
+        currentSrsStageName
+      ) {
         const container = document.createElement("div");
         container.className = "character-header__current-srs-container";
         container.dataset.hidden = "false";
 
         const content = document.createElement("div");
         content.className = "character-header__current-srs-content";
+        content.style.color = textColour;
+
+        const icon = document.createElement("div");
+        icon.className = "character-header__current-srs-icon";
+        if (iconHtml == null) {
+          icon.dataset.hidden = "true";
+        } else {
+          icon.innerHTML = iconHtml;
+        }
 
         const text = document.createElement("div");
         text.className = "character-header__current-srs-text";
         text.textContent = currentSrsStageName;
-        text.style.color = textColour;
 
+        content.appendChild(icon);
         content.appendChild(text);
         container.appendChild(content);
 
@@ -173,11 +208,41 @@
         );
 
         characterHeader.appendChild(container);
-      } else {
-        currentSrsTextDiv.textContent = currentSrsStageName;
-        currentSrsTextDiv.style.color = textColour;
+      }
+
+      function modifyExistingSrsContainer(
+        contentDiv,
+        textColour,
+        iconHtml,
+        currentSrsStageName
+      ) {
+        const iconDiv = contentDiv.querySelector(
+          `div[class='character-header__current-srs-icon']`
+        );
+        const textDiv = contentDiv.querySelector(
+          `div[class='character-header__current-srs-text']`
+        );
+
+        if (iconHtml == null) {
+          iconDiv.dataset.hidden = "true";
+        } else {
+          iconDiv.innerHTML = iconHtml;
+        }
+        textDiv.textContent = currentSrsStageName;
+        contentDiv.style.color = textColour;
       }
     }
+  }
+
+  function getIconHtmlFor(srsStage) {
+    const iconRef = STAGE_TO_ICON_MAP.get(srsStage);
+    if (iconRef == undefined) return null;
+
+    return `
+      <svg class="wk-icon wk-icon--current-srs" viewBox="0 0 512 512" aria-hidden="true">
+        <use href="${iconRef}"></use>
+      </svg>
+    `;
   }
 
   function getQuizQueueTarget(target) {
@@ -219,6 +284,11 @@
                 border-radius:var(--border-radius-tight)
             }
 
+            .character-header__current-srs-icon {
+              display:flex;
+              margin-right:var(--spacing-xtight)
+            }
+
             @supports(container-type: inline-size) {
                 @container (min-width: 768px) {
                     .character-header__current-srs-content {
@@ -237,7 +307,6 @@
 
             .character-header__current-srs-container .character-header__current-srs-content {
                 background-color: rgba(65, 65, 65, 1);
-                color: rgb(144, 164, 174);
             }
         `;
     const styleEl = document.createElement("style");
