@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WaniKani Item SRS Stage Indicator
 // @namespace    http://tampermonkey.net/
-// @version      1.3.0
+// @version      1.4.0
 // @description  Displays the exact item SRS stage (Apprentice IV, Guru I, etc.), both before and after completing a review for the item.
 // @author       romans-boi
 // @license      MIT
@@ -10,11 +10,17 @@
 // @grant        none
 // ==/UserScript==
 
-// If you want the indicator in the top right corner with the stats, change this line to
-// USE_TOP_MENU_BAR_VARIANT = true;
-USE_TOP_MENU_BAR_VARIANT = true;
-
 (async function () {
+  // ==========================================================================================
+  // ------------------------------------------------------------------------------------------
+  // Constants and other important variables
+  // ------------------------------------------------------------------------------------------
+  // ==========================================================================================
+
+  // If you want the indicator in the top right corner with the stats, change this line to
+  // const USE_TOP_MENU_BAR_VARIANT = true;
+  const USE_TOP_MENU_BAR_VARIANT = false;
+
   const CURRENT_NAMES = [
     "Unlocked",
     "Apprentice",
@@ -27,6 +33,7 @@ USE_TOP_MENU_BAR_VARIANT = true;
     "Enlightened",
     "Burned",
   ];
+
   const CORRECTED_NAMES = [
     "Unlocked",
     "Apprentice I",
@@ -62,6 +69,12 @@ USE_TOP_MENU_BAR_VARIANT = true;
   let queueElement;
   let parentElement;
   let clonedQueueElement;
+
+  // ==========================================================================================
+  // ------------------------------------------------------------------------------------------
+  // Initialising and setting up the script
+  // ------------------------------------------------------------------------------------------
+  // ==========================================================================================
 
   window.addEventListener("turbo:load", (event) => {
     // If we're not on the review page, then ignore
@@ -102,11 +115,15 @@ USE_TOP_MENU_BAR_VARIANT = true;
     parentElement.appendChild(clonedQueueElement);
   }
 
+  // ==========================================================================================
+  // ------------------------------------------------------------------------------------------
+  // Set up for correct SRS stage names
+  // ------------------------------------------------------------------------------------------
+  // ==========================================================================================
+
   function replaceSrsStageNames() {
     // Get the element that holds the SRS names, and replace them with the corrected ones.
-    const srsStagesElement = clonedQueueElement.querySelector(
-      `[data-quiz-queue-target="subjectIdsWithSRS"]`
-    );
+    const srsStagesElement = getQuizQueueTarget(SUBJECT_IDS_WITH_SRS_TARGET);
     const srsStagesText = srsStagesElement.textContent;
     const srsStagesCorrectedText = srsStagesText.replaceAll(
       JSON.stringify(CURRENT_NAMES),
@@ -115,22 +132,22 @@ USE_TOP_MENU_BAR_VARIANT = true;
     srsStagesElement.textContent = srsStagesCorrectedText;
   }
 
-  function showCurrentSrsContainer() {
-    document.querySelector(
-      ".character-header__current-srs-container"
-    ).dataset.hidden = "false";
-  }
-
-  function hideCurrentSrsContainer() {
-    document.querySelector(
-      ".character-header__current-srs-container"
-    ).dataset.hidden = "true";
-  }
+  // ==========================================================================================
+  // ------------------------------------------------------------------------------------------
+  // Event listener setup
+  // ------------------------------------------------------------------------------------------
+  // ==========================================================================================
 
   function addDidChangeSrsListener() {
-    window.addEventListener("didChangeSRS", (e) => {
-      hideCurrentSrsContainer();
-    });
+    window.addEventListener("didChangeSRS", onDidChangeSrs);
+
+    function onDidChangeSrs() {
+      if (USE_TOP_MENU_BAR_VARIANT) {
+        // Nothing to be done at the moment.
+      } else {
+        hideSrsContainerItemVariant();
+      }
+    }
   }
 
   function addNextQuestionEventListener() {
@@ -139,11 +156,6 @@ USE_TOP_MENU_BAR_VARIANT = true;
     });
 
     function onNextQuestion(subject) {
-      setCurrentSrsStageText(subject);
-      showCurrentSrsContainer();
-    }
-
-    function setCurrentSrsStageText(subject) {
       const currentItemId = subject.id;
 
       // Get SRS stages config
@@ -162,171 +174,198 @@ USE_TOP_MENU_BAR_VARIANT = true;
       const iconHtml = getIconHtmlFor(currentSrsStageName);
 
       if (USE_TOP_MENU_BAR_VARIANT) {
-        const currentSrsContainerDiv = document.querySelector(
-          `div[class='quiz-statistics__current-srs-container']`
-        );
-
-        if (currentSrsContainerDiv == undefined) {
-          appendNewSrsContainerTopBarVariant(iconHtml, currentSrsStageName);
-        } else {
-          modifyExistingSrsContainerTopBarVariant(
-            currentSrsContainerDiv,
-            iconHtml,
-            currentSrsStageName
-          );
-        }
+        onViewRequestedTopBarVariant(iconHtml, currentSrsStageName);
       } else {
-        const textColour = TEXT_COLOR.get(subject.type);
-
-        const currentSrsContentDiv = document.querySelector(
-          `div[class='character-header__current-srs-content']`
-        );
-
-        // If doesn't exist, create a new container with the icon and text element, otherwise change icon and text.
-        if (currentSrsContentDiv == undefined) {
-          appendNewSrsContainerItemVariant(
-            textColour,
-            iconHtml,
-            currentSrsStageName
-          );
-        } else {
-          modifyExistingSrsContainerItemVariant(
-            currentSrsContentDiv,
-            textColour,
-            iconHtml,
-            currentSrsStageName
-          );
-        }
-      }
-
-      function appendNewSrsContainerItemVariant(
-        textColour,
-        iconHtml,
-        currentSrsStageName
-      ) {
-        const container = document.createElement("div");
-        container.className = "character-header__current-srs-container";
-        container.dataset.hidden = "false";
-
-        const content = document.createElement("div");
-        content.className = "character-header__current-srs-content";
-        content.style.color = textColour;
-
-        const icon = document.createElement("div");
-        icon.className = "character-header__current-srs-icon";
-        if (iconHtml == null) {
-          icon.dataset.hidden = "true";
-        } else {
-          icon.innerHTML = iconHtml;
-        }
-
-        const text = document.createElement("div");
-        text.className = "character-header__current-srs-text";
-        text.textContent = currentSrsStageName;
-
-        content.appendChild(icon);
-        content.appendChild(text);
-        container.appendChild(content);
-
-        const characterHeader = document.querySelector(
-          `div[class='character-header__content']`
-        );
-
-        characterHeader.appendChild(container);
-      }
-
-      function modifyExistingSrsContainerItemVariant(
-        contentDiv,
-        textColour,
-        iconHtml,
-        currentSrsStageName
-      ) {
-        const iconDiv = contentDiv.querySelector(
-          `div[class='character-header__current-srs-icon']`
-        );
-        const textDiv = contentDiv.querySelector(
-          `div[class='character-header__current-srs-text']`
-        );
-
-        if (iconHtml == null) {
-          iconDiv.dataset.hidden = "true";
-        } else {
-          iconDiv.innerHTML = iconHtml;
-        }
-        textDiv.textContent = currentSrsStageName;
-        contentDiv.style.color = textColour;
-      }
-
-      const topBarStyle = `
-    <div class="subject-statistic-counts__item" title="Item Current SRS Stage">
-        <div class="subject-statistic-counts__item-count">
-            <div class="subject-statistic-counts__item-count-icon">
-                <svg viewBox="0 0 512 512" aria-hidden="true">
-                  <use href="#wk-icon__inbox"></use>
-                </svg>
-            </div>
-            <span class="subject-statistic-counts__item-count-text">0</span>
-        </div>
-    </div>
-  `;
-
-      function appendNewSrsContainerTopBarVariant(
-        iconHtml,
-        currentSrsStageName
-      ) {
-        // Copying the structure and style classes of existing WaniKani statistics header.
-        const container = document.createElement("div");
-        container.className = "quiz-statistics__current-srs-container";
-
-        const content = document.createElement("div");
-        content.className = "quiz-statistics__current-srs-content";
-
-        const icon = document.createElement("div");
-        icon.className = "quiz-statistics__current-srs-icon";
-        if (iconHtml == null) {
-          icon.dataset.hidden = "true";
-        } else {
-          icon.innerHTML = iconHtml;
-        }
-
-        const text = document.createElement("div");
-        text.className = "quiz-statistics__current-srs-text";
-        text.textContent = currentSrsStageName;
-        console.log([...currentSrsStageName].map(c => c.charCodeAt(0)));
-
-
-        content.appendChild(icon);
-        content.appendChild(text);
-        container.appendChild(content);
-
-        const statisticsHeader = document.querySelector(
-          `div[class='quiz-statistics']`
-        );
-
-        statisticsHeader.prepend(container);
-      }
-
-      function modifyExistingSrsContainerTopBarVariant(
-        containerDiv,
-        iconHtml,
-        currentSrsStageName
-      ) {
-        const iconDiv = containerDiv.querySelector(
-          `div[class='quiz-statistics__item-count-icon']`
-        );
-        const textDiv = containerDiv.querySelector(
-          `div[class='quiz-statistics__item-count-text']`
-        );
-
-        if (iconHtml == null) {
-          iconDiv.dataset.hidden = "true";
-        } else {
-          iconDiv.innerHTML = iconHtml;
-        }
-        textDiv.textContent = currentSrsStageName;
+        onViewRequestedItemVariant(subject.type, iconHtml, currentSrsStageName);
       }
     }
   }
+
+  // ==========================================================================================
+  // ------------------------------------------------------------------------------------------
+  // SRS indicator under the item
+  // ------------------------------------------------------------------------------------------
+  // ==========================================================================================
+
+  function onViewRequestedItemVariant(
+    subjectType,
+    iconHtml,
+    currentSrsStageName
+  ) {
+    const textColour = TEXT_COLOR.get(subjectType);
+
+    const currentSrsContentDiv = document.querySelector(
+      `div[class='character-header__current-srs-content']`
+    );
+
+    // If doesn't exist, create a new container with the icon and text element, otherwise change icon and text.
+    if (currentSrsContentDiv == undefined) {
+      appendNewSrsContainerItemVariant(
+        textColour,
+        iconHtml,
+        currentSrsStageName
+      );
+    } else {
+      modifyExistingSrsContainerItemVariant(
+        currentSrsContentDiv,
+        textColour,
+        iconHtml,
+        currentSrsStageName
+      );
+    }
+
+    showSrsContainerItemVariant();
+  }
+
+  function showSrsContainerItemVariant() {
+    document.querySelector(
+      ".character-header__current-srs-container"
+    ).dataset.hidden = "false";
+  }
+
+  function hideSrsContainerItemVariant() {
+    document.querySelector(
+      ".character-header__current-srs-container"
+    ).dataset.hidden = "true";
+  }
+
+  function appendNewSrsContainerItemVariant(
+    textColour,
+    iconHtml,
+    currentSrsStageName
+  ) {
+    const container = document.createElement("div");
+    container.className = "character-header__current-srs-container";
+    container.dataset.hidden = "false";
+
+    const content = document.createElement("div");
+    content.className = "character-header__current-srs-content";
+    content.style.color = textColour;
+
+    const icon = document.createElement("div");
+    icon.className = "character-header__current-srs-icon";
+    if (iconHtml == null) {
+      icon.dataset.hidden = "true";
+    } else {
+      icon.innerHTML = iconHtml;
+    }
+
+    const text = document.createElement("div");
+    text.className = "character-header__current-srs-text";
+    text.textContent = currentSrsStageName;
+
+    content.appendChild(icon);
+    content.appendChild(text);
+    container.appendChild(content);
+
+    const characterHeader = document.querySelector(
+      `div[class='character-header__content']`
+    );
+
+    characterHeader.appendChild(container);
+  }
+
+  function modifyExistingSrsContainerItemVariant(
+    contentDiv,
+    textColour,
+    iconHtml,
+    currentSrsStageName
+  ) {
+    const iconDiv = contentDiv.querySelector(
+      `div[class='character-header__current-srs-icon']`
+    );
+    const textDiv = contentDiv.querySelector(
+      `div[class='character-header__current-srs-text']`
+    );
+
+    if (iconHtml == null) {
+      iconDiv.dataset.hidden = "true";
+    } else {
+      iconDiv.innerHTML = iconHtml;
+    }
+    textDiv.textContent = currentSrsStageName;
+    contentDiv.style.color = textColour;
+  }
+
+  // ==========================================================================================
+  // ------------------------------------------------------------------------------------------
+  // SRS indicator in top bar menu
+  // ------------------------------------------------------------------------------------------
+  // ==========================================================================================
+
+  function onViewRequestedTopBarVariant(iconHtml, currentSrsStageName) {
+    const currentSrsContainerDiv = document.querySelector(
+      `div[id='top-current-srs-stage-container']`
+    );
+
+    if (currentSrsContainerDiv == undefined) {
+      appendNewSrsContainerTopBarVariant(iconHtml, currentSrsStageName);
+    } else {
+      modifyExistingSrsContainerTopBarVariant(
+        currentSrsContainerDiv,
+        iconHtml,
+        currentSrsStageName
+      );
+    }
+  }
+
+  function appendNewSrsContainerTopBarVariant(iconHtml, currentSrsStageName) {
+    // Copying the structure and style classes of existing WaniKani statistics header.
+    const container = document.createElement("div");
+    container.className = "quiz-statistics__item";
+    container.id = "top-current-srs-stage-container";
+
+    const content = document.createElement("div");
+    content.className = "quiz-statistics__item-count";
+
+    const icon = document.createElement("div");
+    icon.className = "quiz-statistics__item-count-icon";
+    if (iconHtml == null) {
+      icon.dataset.hidden = "true";
+    } else {
+      icon.innerHTML = iconHtml;
+    }
+
+    const text = document.createElement("div");
+    text.className = "quiz-statistics__item-count-text";
+    text.textContent = currentSrsStageName;
+
+    content.appendChild(icon);
+    content.appendChild(text);
+    container.appendChild(content);
+
+    const statisticsHeader = document.querySelector(
+      `div[class='quiz-statistics']`
+    );
+
+    statisticsHeader.prepend(container);
+  }
+
+  function modifyExistingSrsContainerTopBarVariant(
+    containerDiv,
+    iconHtml,
+    currentSrsStageName
+  ) {
+    const iconDiv = containerDiv.querySelector(
+      `div[class='quiz-statistics__item-count-icon']`
+    );
+    const textDiv = containerDiv.querySelector(
+      `div[class='quiz-statistics__item-count-text']`
+    );
+
+    if (iconHtml == null) {
+      iconDiv.dataset.hidden = "true";
+    } else {
+      iconDiv.innerHTML = iconHtml;
+    }
+    textDiv.textContent = currentSrsStageName;
+  }
+
+  // ==========================================================================================
+  // ------------------------------------------------------------------------------------------
+  // Random helpers
+  // ------------------------------------------------------------------------------------------
+  // ==========================================================================================
 
   function getIconHtmlFor(srsStage) {
     const iconRef = STAGE_TO_ICON_MAP.get(srsStage);
@@ -345,33 +384,18 @@ USE_TOP_MENU_BAR_VARIANT = true;
     );
   }
 
+  // ==========================================================================================
+  // ------------------------------------------------------------------------------------------
+  // Styling
+  // ------------------------------------------------------------------------------------------
+  // ==========================================================================================
+
   function addStyle() {
     // Add CSS style for current SRS elements
     const cssStyle = `
-
-    .quiz-statistics__current-srs-container {
-  display: flex;
-  align-items: center;
-  margin-right: 8px;
-  white-space: pre-wrap;
-}
-
-    .quiz-statistics__current-srs-content {
-  padding: 0px 4px;
-    display: flex;
-  align-items: center;
-  border-radius: 3px;
-}
-
-.quiz-statistics__current-srs-icon {
-  margin-right: 4px;
-  display: flex;
-}
-
-.quiz-statistics__current-srs-text {
-  white-space: nowrap;
-
-}
+            .quiz-statistics__item-count-text {
+                white-space: nowrap;
+            }
 
             .character-header__current-srs-container {
                 position:absolute;
