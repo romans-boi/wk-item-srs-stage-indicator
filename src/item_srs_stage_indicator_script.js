@@ -10,6 +10,10 @@
 // @grant        none
 // ==/UserScript==
 
+// If you want the indicator in the top right corner with the stats, change this line to
+// USE_TOP_MENU_BAR_VARIANT = true;
+USE_TOP_MENU_BAR_VARIANT = true;
+
 (async function () {
   const CURRENT_NAMES = [
     "Unlocked",
@@ -155,26 +159,47 @@
       )[1];
       const currentSrsStageName = CORRECTED_NAMES[currentItemSrsIndex];
 
-      const textColour = TEXT_COLOR.get(subject.type);
       const iconHtml = getIconHtmlFor(currentSrsStageName);
 
-      const currentSrsContentDiv = document.querySelector(
-        `div[class='character-header__current-srs-content']`
-      );
-
-      // If doesn't exist, create a new container with the icon and text element, otherwise change icon and text.
-      if (currentSrsContentDiv == undefined) {
-        appendNewCurrentSrsContainer(textColour, iconHtml, currentSrsStageName);
-      } else {
-        modifyExistingSrsContainer(
-          currentSrsContentDiv,
-          textColour,
-          iconHtml,
-          currentSrsStageName
+      if (USE_TOP_MENU_BAR_VARIANT) {
+        const currentSrsContainerDiv = document.querySelector(
+          `div[class='quiz-statistics__current-srs-container']`
         );
+
+        if (currentSrsContainerDiv == undefined) {
+          appendNewSrsContainerTopBarVariant(iconHtml, currentSrsStageName);
+        } else {
+          modifyExistingSrsContainerTopBarVariant(
+            currentSrsContainerDiv,
+            iconHtml,
+            currentSrsStageName
+          );
+        }
+      } else {
+        const textColour = TEXT_COLOR.get(subject.type);
+
+        const currentSrsContentDiv = document.querySelector(
+          `div[class='character-header__current-srs-content']`
+        );
+
+        // If doesn't exist, create a new container with the icon and text element, otherwise change icon and text.
+        if (currentSrsContentDiv == undefined) {
+          appendNewSrsContainerItemVariant(
+            textColour,
+            iconHtml,
+            currentSrsStageName
+          );
+        } else {
+          modifyExistingSrsContainerItemVariant(
+            currentSrsContentDiv,
+            textColour,
+            iconHtml,
+            currentSrsStageName
+          );
+        }
       }
 
-      function appendNewCurrentSrsContainer(
+      function appendNewSrsContainerItemVariant(
         textColour,
         iconHtml,
         currentSrsStageName
@@ -210,7 +235,7 @@
         characterHeader.appendChild(container);
       }
 
-      function modifyExistingSrsContainer(
+      function modifyExistingSrsContainerItemVariant(
         contentDiv,
         textColour,
         iconHtml,
@@ -230,6 +255,75 @@
         }
         textDiv.textContent = currentSrsStageName;
         contentDiv.style.color = textColour;
+      }
+
+      const topBarStyle = `
+    <div class="subject-statistic-counts__item" title="Item Current SRS Stage">
+        <div class="subject-statistic-counts__item-count">
+            <div class="subject-statistic-counts__item-count-icon">
+                <svg viewBox="0 0 512 512" aria-hidden="true">
+                  <use href="#wk-icon__inbox"></use>
+                </svg>
+            </div>
+            <span class="subject-statistic-counts__item-count-text">0</span>
+        </div>
+    </div>
+  `;
+
+      function appendNewSrsContainerTopBarVariant(
+        iconHtml,
+        currentSrsStageName
+      ) {
+        // Copying the structure and style classes of existing WaniKani statistics header.
+        const container = document.createElement("div");
+        container.className = "quiz-statistics__current-srs-container";
+
+        const content = document.createElement("div");
+        content.className = "quiz-statistics__current-srs-content";
+
+        const icon = document.createElement("div");
+        icon.className = "quiz-statistics__current-srs-icon";
+        if (iconHtml == null) {
+          icon.dataset.hidden = "true";
+        } else {
+          icon.innerHTML = iconHtml;
+        }
+
+        const text = document.createElement("div");
+        text.className = "quiz-statistics__current-srs-text";
+        text.textContent = currentSrsStageName;
+        console.log([...currentSrsStageName].map(c => c.charCodeAt(0)));
+
+
+        content.appendChild(icon);
+        content.appendChild(text);
+        container.appendChild(content);
+
+        const statisticsHeader = document.querySelector(
+          `div[class='quiz-statistics']`
+        );
+
+        statisticsHeader.prepend(container);
+      }
+
+      function modifyExistingSrsContainerTopBarVariant(
+        containerDiv,
+        iconHtml,
+        currentSrsStageName
+      ) {
+        const iconDiv = containerDiv.querySelector(
+          `div[class='quiz-statistics__item-count-icon']`
+        );
+        const textDiv = containerDiv.querySelector(
+          `div[class='quiz-statistics__item-count-text']`
+        );
+
+        if (iconHtml == null) {
+          iconDiv.dataset.hidden = "true";
+        } else {
+          iconDiv.innerHTML = iconHtml;
+        }
+        textDiv.textContent = currentSrsStageName;
       }
     }
   }
@@ -254,6 +348,31 @@
   function addStyle() {
     // Add CSS style for current SRS elements
     const cssStyle = `
+
+    .quiz-statistics__current-srs-container {
+  display: flex;
+  align-items: center;
+  margin-right: 8px;
+  white-space: pre-wrap;
+}
+
+    .quiz-statistics__current-srs-content {
+  padding: 0px 4px;
+    display: flex;
+  align-items: center;
+  border-radius: 3px;
+}
+
+.quiz-statistics__current-srs-icon {
+  margin-right: 4px;
+  display: flex;
+}
+
+.quiz-statistics__current-srs-text {
+  white-space: nowrap;
+
+}
+
             .character-header__current-srs-container {
                 position:absolute;
                 bottom:10px;
