@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WaniKani Item SRS Stage Indicator
 // @namespace    http://tampermonkey.net/
-// @version      1.4.0
+// @version      1.5.0
 // @description  Displays the exact item SRS stage (Apprentice IV, Guru I, etc.), both before and after completing a review for the item.
 // @author       romans-boi
 // @license      MIT
@@ -16,6 +16,9 @@
   // Constants and other important variables
   // ------------------------------------------------------------------------------------------
   // ==========================================================================================
+  const APP_ID = "wk-item-srs-stage-indicator";
+  const APP_TITLE = "Item SRS Stage Indicator";
+  const WKOF_MODULES = "Menu, Settings";
 
   const CURRENT_NAMES = [
     "Unlocked",
@@ -69,9 +72,7 @@
 
   const SUBJECT_IDS_WITH_SRS_TARGET = "subjectIdsWithSRS";
 
-  const SETTINGS_ID = "item_srs_stage_indicator_settings";
-
-  let settingsDialog = {};
+  let settings = {};
 
   let queueElement;
   let parentElement;
@@ -79,77 +80,45 @@
 
   // ==========================================================================================
   // ------------------------------------------------------------------------------------------
-  // WaniKani Open Framework Setup
+  // Initialising and setting up the script
   // ------------------------------------------------------------------------------------------
   // ==========================================================================================
 
+  // Optionally including wkof modules
   if (!window.wkof) {
     alert(
       "WaniKani Item SRS Stage Indicator script needs Wanikani Open Framework if you would like " +
         "to use Settings to switch between indicator variants."
     );
-    mainSetup();
   } else {
-    const modules = "Menu, Settings";
-    wkof.include(modules);
-    wkof.ready(modules).then(wkofSetup);
+    wkof.include(WKOF_MODULES);
   }
 
-  function wkofSetup() {
-    wkof.Settings.load(SETTINGS_ID).then(initSettings);
-    
+  // Main event listener for all the page loads
+  window.addEventListener("turbo:load", onTurboLoad);
 
-    function initSettings() {
-      wkof.Menu.insert_script_link({
-        name: SETTINGS_ID,
-        submenu: "Settings",
-        title: "Item SRS Stage Indicator",
-        on_click: dialogOpen,
-      });
-
-      settingsDialog = new wkof.Settings({
-        script_id: SETTINGS_ID,
-        title: "Item SRS Stage Indicator",
-        content: {
-          config: {
-            type: "group",
-            label: "Configuration",
-            content: {
-              indicatorVariant: {
-                type: "dropdown",
-                label: "SRS Stage Indicator Variant",
-                default: REVIEW_INDICATOR_VARIANT_DEFAULT,
-                hover_tip:
-                  "Current SRS stage indicator variant you would like to see in reviews.",
-                content: REVIEW_INDICATOR_VARIANTS,
-              },
-            },
-          },
-        },
-      });
-
-      settingsDialog.load();
-      mainSetup();
-    }
-
-    function dialogOpen() {
-      settingsDialog.open();
+  function onTurboLoad(event) {
+    if (!window.wkof) {
+      initReview(event.detail.url);
+    } else {
+      // Wait for wkof modules and settings to be ready, then do all the initialisations
+      wkof
+        .ready(WKOF_MODULES)
+        .then(() => {
+          return wkof.Settings.load(APP_ID);
+        })
+        .then(() => {
+          initWkofSettings();
+          initReview(event.detail.url);
+        });
     }
   }
 
-  // ==========================================================================================
-  // ------------------------------------------------------------------------------------------
-  // Initialising and setting up the script
-  // ------------------------------------------------------------------------------------------
-  // ==========================================================================================
+  function initReview(url) {
+    // If we're not on the review page, then ignore
+    if (!/subjects\/review/.test(url)) return;
 
-  function mainSetup() {
-    window.addEventListener("turbo:load", (event) => {
-      // If we're not on the review page, then ignore
-      if (!/subjects\/review/.test(event.detail.url)) return;
-
-      waitForQuizQueue(init);
-    });
+    waitForQuizQueue(setupReviewUi);
 
     function waitForQuizQueue(callback) {
       // Need to make sure we wait for quiz queue to be available first
@@ -167,7 +136,7 @@
       });
     }
 
-    function init() {
+    function setupReviewUi() {
       // As recommended by Tofugu Scott: https://community.wanikani.com/t/updates-to-lessons-reviews-and-extra-study/60912/28
       queueElement = document.getElementById("quiz-queue");
       parentElement = queueElement.parentElement;
@@ -177,14 +146,60 @@
       addStyle();
       replaceSrsStageNames();
 
-      if (settingsDialog.indicatorVariant != "none") {
-        console.log(settingsDialog.indicatorVariant);
+      // If undefined, we use the default value later on. Only 'none' case means to hide the UI.
+      if (settings.indicatorVariant != "none") {
         addDidChangeSrsListener();
         addNextQuestionEventListener();
       }
 
       parentElement.appendChild(clonedQueueElement);
     }
+  }
+
+  // ==========================================================================================
+  // ------------------------------------------------------------------------------------------
+  // WaniKani Open Framework Helpers
+  // ------------------------------------------------------------------------------------------
+  // ==========================================================================================
+
+  function initWkofSettings() {
+    wkof.Menu.insert_script_link({
+      name: APP_ID,
+      submenu: "Settings",
+      title: APP_TITLE,
+      on_click: dialogOpen,
+    });
+
+    settings = wkof.settings[APP_ID];
+  }
+
+  function dialogOpen() {
+    const dialog = new wkof.Settings({
+      script_id: APP_ID,
+      title: APP_TITLE,
+      on_close: (values) => {
+        console.log("on_close");
+        onTurboLoad({ detail: { url: `${window.location.href}` } });
+      },
+      content: {
+        config: {
+          type: "group",
+          label: "Configuration",
+          content: {
+            indicatorVariant: {
+              type: "dropdown",
+              label: "SRS Stage Indicator Variant",
+              default: REVIEW_INDICATOR_VARIANT_DEFAULT,
+              hover_tip:
+                "Current SRS stage indicator variant you would like to see in reviews.",
+              content: REVIEW_INDICATOR_VARIANTS,
+            },
+          },
+        },
+      },
+    });
+
+    dialog.open();
   }
 
   // ==========================================================================================
@@ -459,7 +474,7 @@
   }
 
   function getVariantSettingWithDefault() {
-    const variant = settingsDialog.indicatorVariant;
+    const variant = settings.indicatorVariant;
     return typeof variant === "undefined"
       ? REVIEW_INDICATOR_VARIANT_DEFAULT
       : variant;
