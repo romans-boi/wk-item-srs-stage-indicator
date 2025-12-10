@@ -17,10 +17,6 @@
   // ------------------------------------------------------------------------------------------
   // ==========================================================================================
 
-  // If you want the indicator in the top right corner with the stats, change this line to
-  // const USE_TOP_MENU_BAR_VARIANT = true;
-  const USE_TOP_MENU_BAR_VARIANT = false;
-
   const CURRENT_NAMES = [
     "Unlocked",
     "Apprentice",
@@ -64,7 +60,18 @@
     ["Vocabulary", "#edcaff"],
   ]);
 
+  const REVIEW_INDICATOR_VARIANTS = {
+    none: "No current SRS indicator",
+    underItem: "Under the item",
+    topStatsBar: "Top-Right Statistics Bar",
+  };
+  const REVIEW_INDICATOR_VARIANT_DEFAULT = "topStatsBar";
+
   const SUBJECT_IDS_WITH_SRS_TARGET = "subjectIdsWithSRS";
+
+  const SETTINGS_ID = "item_srs_stage_indicator_settings";
+
+  let settingsDialog = {};
 
   let queueElement;
   let parentElement;
@@ -72,47 +79,112 @@
 
   // ==========================================================================================
   // ------------------------------------------------------------------------------------------
+  // WaniKani Open Framework Setup
+  // ------------------------------------------------------------------------------------------
+  // ==========================================================================================
+
+  if (!window.wkof) {
+    alert(
+      "WaniKani Item SRS Stage Indicator script needs Wanikani Open Framework if you would like " +
+        "to use Settings to switch between indicator variants."
+    );
+    mainSetup();
+  } else {
+    const modules = "Menu, Settings";
+    wkof.include(modules);
+    wkof.ready(modules).then(wkofSetup);
+  }
+
+  function wkofSetup() {
+    wkof.Settings.load(SETTINGS_ID).then(initSettings);
+    
+
+    function initSettings() {
+      wkof.Menu.insert_script_link({
+        name: SETTINGS_ID,
+        submenu: "Settings",
+        title: "Item SRS Stage Indicator",
+        on_click: dialogOpen,
+      });
+
+      settingsDialog = new wkof.Settings({
+        script_id: SETTINGS_ID,
+        title: "Item SRS Stage Indicator",
+        content: {
+          config: {
+            type: "group",
+            label: "Configuration",
+            content: {
+              indicatorVariant: {
+                type: "dropdown",
+                label: "SRS Stage Indicator Variant",
+                default: REVIEW_INDICATOR_VARIANT_DEFAULT,
+                hover_tip:
+                  "Current SRS stage indicator variant you would like to see in reviews.",
+                content: REVIEW_INDICATOR_VARIANTS,
+              },
+            },
+          },
+        },
+      });
+
+      settingsDialog.load();
+      mainSetup();
+    }
+
+    function dialogOpen() {
+      settingsDialog.open();
+    }
+  }
+
+  // ==========================================================================================
+  // ------------------------------------------------------------------------------------------
   // Initialising and setting up the script
   // ------------------------------------------------------------------------------------------
   // ==========================================================================================
 
-  window.addEventListener("turbo:load", (event) => {
-    // If we're not on the review page, then ignore
-    if (!/subjects\/review/.test(event.detail.url)) return;
+  function mainSetup() {
+    window.addEventListener("turbo:load", (event) => {
+      // If we're not on the review page, then ignore
+      if (!/subjects\/review/.test(event.detail.url)) return;
 
-    waitForQuizQueue(init);
-  });
+      waitForQuizQueue(init);
+    });
 
-  function waitForQuizQueue(callback) {
-    // Need to make sure we wait for quiz queue to be available first
-    const observer = new MutationObserver((mutations, observer) => {
-      const element = document.getElementById("quiz-queue");
-      if (element) {
-        observer.disconnect();
-        callback();
+    function waitForQuizQueue(callback) {
+      // Need to make sure we wait for quiz queue to be available first
+      const observer = new MutationObserver((mutations, observer) => {
+        const element = document.getElementById("quiz-queue");
+        if (element) {
+          observer.disconnect();
+          callback();
+        }
+      });
+
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+      });
+    }
+
+    function init() {
+      // As recommended by Tofugu Scott: https://community.wanikani.com/t/updates-to-lessons-reviews-and-extra-study/60912/28
+      queueElement = document.getElementById("quiz-queue");
+      parentElement = queueElement.parentElement;
+      clonedQueueElement = queueElement.cloneNode(true);
+      queueElement.remove();
+
+      addStyle();
+      replaceSrsStageNames();
+
+      if (settingsDialog.indicatorVariant != "none") {
+        console.log(settingsDialog.indicatorVariant);
+        addDidChangeSrsListener();
+        addNextQuestionEventListener();
       }
-    });
 
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-    });
-  }
-
-  function init() {
-    // As recommended by Tofugu Scott: https://community.wanikani.com/t/updates-to-lessons-reviews-and-extra-study/60912/28
-    queueElement = document.getElementById("quiz-queue");
-    parentElement = queueElement.parentElement;
-    clonedQueueElement = queueElement.cloneNode(true);
-    queueElement.remove();
-
-    addStyle();
-    replaceSrsStageNames();
-
-    addDidChangeSrsListener();
-    addNextQuestionEventListener();
-
-    parentElement.appendChild(clonedQueueElement);
+      parentElement.appendChild(clonedQueueElement);
+    }
   }
 
   // ==========================================================================================
@@ -142,9 +214,10 @@
     window.addEventListener("didChangeSRS", onDidChangeSrs);
 
     function onDidChangeSrs() {
-      if (USE_TOP_MENU_BAR_VARIANT) {
+      const variant = getVariantSettingWithDefault();
+      if (variant == "topStatsBar") {
         // Nothing to be done at the moment.
-      } else {
+      } else if (variant == "underItem") {
         hideSrsContainerItemVariant();
       }
     }
@@ -173,9 +246,10 @@
 
       const iconHtml = getIconHtmlFor(currentSrsStageName);
 
-      if (USE_TOP_MENU_BAR_VARIANT) {
+      const variant = getVariantSettingWithDefault();
+      if (variant == "topStatsBar") {
         onViewRequestedTopBarVariant(iconHtml, currentSrsStageName);
-      } else {
+      } else if (variant == "underItem") {
         onViewRequestedItemVariant(subject.type, iconHtml, currentSrsStageName);
       }
     }
@@ -382,6 +456,13 @@
     return clonedQueueElement.querySelector(
       `[data-quiz-queue-target="${target}"]`
     );
+  }
+
+  function getVariantSettingWithDefault() {
+    const variant = settingsDialog.indicatorVariant;
+    return typeof variant === "undefined"
+      ? REVIEW_INDICATOR_VARIANT_DEFAULT
+      : variant;
   }
 
   // ==========================================================================================
