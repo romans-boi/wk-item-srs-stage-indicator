@@ -118,25 +118,22 @@
     // If we're not on the review page, then ignore
     if (!/subjects\/review/.test(url)) return;
 
-    waitForQuizQueue(setupReviewUi);
+    console.log("Initialising");
 
-    function waitForQuizQueue(callback) {
-      // Need to make sure we wait for quiz queue to be available first
-      const observer = new MutationObserver((mutations, observer) => {
+    waitForQuizQueue();
+
+    function waitForQuizQueue() {
+      const check = setInterval(() => {
         const element = document.getElementById("quiz-queue");
         if (element) {
-          observer.disconnect();
-          callback();
+          clearInterval(check);
+          setupReviewUi();
         }
-      });
-
-      observer.observe(document.body, {
-        childList: true,
-        subtree: true,
-      });
+      }, 50);
     }
 
     function setupReviewUi() {
+      console.log("setting up review UI");
       // As recommended by Tofugu Scott: https://community.wanikani.com/t/updates-to-lessons-reviews-and-extra-study/60912/28
       queueElement = document.getElementById("quiz-queue");
       parentElement = queueElement.parentElement;
@@ -148,11 +145,37 @@
 
       // If undefined, we use the default value later on. Only 'none' case means to hide the UI.
       if (settings.indicatorVariant != "none") {
-        addDidChangeSrsListener();
-        addNextQuestionEventListener();
+        console.log("adding listeners");
+        addReviewListeners();
+      } else {
+        hideSrsContainerItemVariant();
+        hideSrsContainerTopBarVariant();
+        removeReviewListeners();
       }
 
       parentElement.appendChild(clonedQueueElement);
+    }
+  }
+
+  function updateReviewUi(url) {
+    // If we're not on the review page, then ignore
+    if (!/subjects\/review/.test(url)) return;
+
+    if (settings.indicatorVariant == "none") {
+      hideSrsContainerItemVariant();
+      hideSrsContainerTopBarVariant();
+      removeReviewListeners();
+    } else {
+      console.log('Adding review listeners');
+      addReviewListeners();
+
+      if (settings.indicatorVariant == "underItem") {
+        console.log('Hiding top bar');
+        hideSrsContainerTopBarVariant();
+      } else if (settings.indicatorVariant == "topStatsBar") {
+        console.log('Hiding item variant');
+        hideSrsContainerItemVariant();
+      }
     }
   }
 
@@ -179,7 +202,8 @@
       title: APP_TITLE,
       on_close: (values) => {
         console.log("on_close");
-        onTurboLoad({ detail: { url: `${window.location.href}` } });
+        console.log(window.location.href);
+        updateReviewUi(window.location.href);
       },
       content: {
         config: {
@@ -225,48 +249,49 @@
   // ------------------------------------------------------------------------------------------
   // ==========================================================================================
 
-  function addDidChangeSrsListener() {
+  function addReviewListeners() {
     window.addEventListener("didChangeSRS", onDidChangeSrs);
+    window.addEventListener("willShowNextQuestion", onNextQuestion);
+  }
 
-    function onDidChangeSrs() {
-      const variant = getVariantSettingWithDefault();
-      if (variant == "topStatsBar") {
-        // Nothing to be done at the moment.
-      } else if (variant == "underItem") {
-        hideSrsContainerItemVariant();
-      }
+  function removeReviewListeners() {
+    window.removeEventListener("didChangeSRS", onDidChangeSrs);
+    window.removeEventListener("willShowNextQuestion", onNextQuestion);
+  }
+
+  function onDidChangeSrs() {
+    const variant = getVariantSettingWithDefault();
+    if (variant == "topStatsBar") {
+      // Nothing to be done at the moment.
+    } else if (variant == "underItem") {
+      hideSrsContainerItemVariant();
     }
   }
 
-  function addNextQuestionEventListener() {
-    window.addEventListener("willShowNextQuestion", (event) => {
-      onNextQuestion(event.detail.subject);
-    });
+  function onNextQuestion(event) {
+    const subject = event.detail.subject;
+    const currentItemId = subject.id;
 
-    function onNextQuestion(subject) {
-      const currentItemId = subject.id;
+    // Get SRS stages config
+    const srsStagesJson = JSON.parse(
+      getQuizQueueTarget(SUBJECT_IDS_WITH_SRS_TARGET).textContent
+    );
+    const subjectIdSrsList = srsStagesJson.subject_ids_with_srs_info;
 
-      // Get SRS stages config
-      const srsStagesJson = JSON.parse(
-        getQuizQueueTarget(SUBJECT_IDS_WITH_SRS_TARGET).textContent
-      );
-      const subjectIdSrsList = srsStagesJson.subject_ids_with_srs_info;
+    // The tuple we get for a subject looks like this `[id, index, X]` where X is pointing to which array of SRS names to use within
+    // srs_ids_stage_names, but from what I can tell... it doesn't matter? So I just use the local corrected names array for lookup.
+    const currentItemSrsIndex = subjectIdSrsList.find(
+      (subjectSrsInfo) => subjectSrsInfo[0] == currentItemId
+    )[1];
+    const currentSrsStageName = CORRECTED_NAMES[currentItemSrsIndex];
 
-      // The tuple we get for a subject looks like this `[id, index, X]` where X is pointing to which array of SRS names to use within
-      // srs_ids_stage_names, but from what I can tell... it doesn't matter? So I just use the local corrected names array for lookup.
-      const currentItemSrsIndex = subjectIdSrsList.find(
-        (subjectSrsInfo) => subjectSrsInfo[0] == currentItemId
-      )[1];
-      const currentSrsStageName = CORRECTED_NAMES[currentItemSrsIndex];
+    const iconHtml = getIconHtmlFor(currentSrsStageName);
 
-      const iconHtml = getIconHtmlFor(currentSrsStageName);
-
-      const variant = getVariantSettingWithDefault();
-      if (variant == "topStatsBar") {
-        onViewRequestedTopBarVariant(iconHtml, currentSrsStageName);
-      } else if (variant == "underItem") {
-        onViewRequestedItemVariant(subject.type, iconHtml, currentSrsStageName);
-      }
+    const variant = getVariantSettingWithDefault();
+    if (variant == "topStatsBar") {
+      onViewRequestedTopBarVariant(iconHtml, currentSrsStageName);
+    } else if (variant == "underItem") {
+      onViewRequestedItemVariant(subject.type, iconHtml, currentSrsStageName);
     }
   }
 
@@ -281,6 +306,7 @@
     iconHtml,
     currentSrsStageName
   ) {
+    console.log('onViewRequestedItemVariant')
     const textColour = TEXT_COLOR.get(subjectType);
 
     const currentSrsContentDiv = document.querySelector(
@@ -307,15 +333,22 @@
   }
 
   function showSrsContainerItemVariant() {
-    document.querySelector(
+    const div = document.querySelector(
       ".character-header__current-srs-container"
-    ).dataset.hidden = "false";
+    );
+    if (div != undefined) {
+      div.dataset.hidden = "false";
+    }
   }
 
   function hideSrsContainerItemVariant() {
-    document.querySelector(
+    const div = document.querySelector(
       ".character-header__current-srs-container"
-    ).dataset.hidden = "true";
+    );
+    console.log("Item variant div", div);
+    if (div != undefined) {
+      div.dataset.hidden = "true";
+    }
   }
 
   function appendNewSrsContainerItemVariant(
@@ -334,7 +367,7 @@
     const icon = document.createElement("div");
     icon.className = "character-header__current-srs-icon";
     if (iconHtml == null) {
-      icon.dataset.hidden = "true";
+      icon.hidden = "true";
     } else {
       icon.innerHTML = iconHtml;
     }
@@ -368,7 +401,7 @@
     );
 
     if (iconHtml == null) {
-      iconDiv.dataset.hidden = "true";
+      iconDiv.hidden = "true";
     } else {
       iconDiv.innerHTML = iconHtml;
     }
@@ -383,6 +416,7 @@
   // ==========================================================================================
 
   function onViewRequestedTopBarVariant(iconHtml, currentSrsStageName) {
+    console.log('onViewRequestedTopBarVariant')
     const currentSrsContainerDiv = document.querySelector(
       `div[id='top-current-srs-stage-container']`
     );
@@ -396,9 +430,12 @@
         currentSrsStageName
       );
     }
+
+    showSrsContainerTopBarVariant();
   }
 
   function appendNewSrsContainerTopBarVariant(iconHtml, currentSrsStageName) {
+    console.log('appendNewSrsContainerTopBarVariant')
     // Copying the structure and style classes of existing WaniKani statistics header.
     const container = document.createElement("div");
     container.className = "quiz-statistics__item";
@@ -410,7 +447,7 @@
     const icon = document.createElement("div");
     icon.className = "quiz-statistics__item-count-icon";
     if (iconHtml == null) {
-      icon.dataset.hidden = "true";
+      icon.hidden = "true";
     } else {
       icon.innerHTML = iconHtml;
     }
@@ -435,6 +472,7 @@
     iconHtml,
     currentSrsStageName
   ) {
+    console.log('modifyExistingSrsContainerTopBarVariant')
     const iconDiv = containerDiv.querySelector(
       `div[class='quiz-statistics__item-count-icon']`
     );
@@ -443,11 +481,31 @@
     );
 
     if (iconHtml == null) {
-      iconDiv.dataset.hidden = "true";
+      iconDiv.hidden = "true";
     } else {
       iconDiv.innerHTML = iconHtml;
     }
     textDiv.textContent = currentSrsStageName;
+  }
+
+  function showSrsContainerTopBarVariant() {
+    const div = document.querySelector(
+      `div[id='top-current-srs-stage-container']`
+    );
+    console.log("Showing top bar", div);
+    if (div != undefined) {
+      div.style.display = "inline";
+    }
+  }
+
+  function hideSrsContainerTopBarVariant() {
+    const div = document.querySelector(
+      `div[id='top-current-srs-stage-container']`
+    );
+    console.log("Hiding top bar", div);
+    if (div != undefined) {
+      div.style.display = "none";
+    }
   }
 
   // ==========================================================================================
