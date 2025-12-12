@@ -141,7 +141,7 @@
     const { pageUrl } = state;
 
     if (/subjects\/review/.test(pageUrl)) {
-      reviewPage.init(state);
+      ReviewPage.init();
     } else {
       // Nothing to be done at the moment
     }
@@ -151,7 +151,7 @@
     const { pageUrl } = state;
 
     if (/subjects\/review/.test(pageUrl)) {
-      srsIndicator.onSettingsChanged(state);
+      SrsIndicator.onSettingsChanged();
     } else {
       // Nothing to be done at the moment
     }
@@ -163,16 +163,14 @@
   // ------------------------------------------------------------------------------------------
   // ==========================================================================================
 
-  const reviewPage = {
+  const ReviewPage = {
     async init() {
-      console.log("[Review] Init");
-
       state.review.queueElement = await waitForElement("#quiz-queue");
 
       addStyle();
 
-      queueManager.init();
-      srsIndicator.init();
+      QueueManager.init();
+      SrsIndicator.init();
     },
   };
 
@@ -182,7 +180,7 @@
   // ------------------------------------------------------------------------------------------
   // ==========================================================================================
 
-  const queueManager = {
+  const QueueManager = {
     init() {
       const queue = state.review.queueElement;
       const parent = queue.parentElement;
@@ -221,16 +219,19 @@
   // ------------------------------------------------------------------------------------------
   // ==========================================================================================
 
-  const srsIndicator = {
+  const SrsIndicator = {
     init() {
       const variant = state.settings.indicatorVariant;
 
       this.reset();
+
       if (variant === "none") {
         return;
       }
 
-      console.log("[SRS] Init with variant:", variant);
+      this.onNextQuestion = this.onNextQuestion.bind(this);
+      this.onDidChangeSrs = this.onDidChangeSrs.bind(this);
+
       this.addListeners();
       this.onViewRequested();
     },
@@ -247,8 +248,8 @@
     },
 
     addListeners() {
-      window.addEventListener("didChangeSRS", this.onDidChangeSrs.bind(this));
-      window.addEventListener("willShowNextQuestion", this.onNextQuestion).bind(this);
+      window.addEventListener("didChangeSRS", this.onDidChangeSrs);
+      window.addEventListener("willShowNextQuestion", this.onNextQuestion);
     },
 
     removeListeners() {
@@ -271,8 +272,9 @@
 
       // Get SRS stages config
       const srsStagesJson = JSON.parse(
-        queueManager.getQuizQueueTarget(SUBJECT_IDS_WITH_SRS_TARGET).textContent
+        QueueManager.getQuizQueueTarget(SUBJECT_IDS_WITH_SRS_TARGET).textContent
       );
+
       const subjectIdSrsList = srsStagesJson.subject_ids_with_srs_info;
 
       // The tuple we get for a subject looks like this `[id, index, X]` where X is pointing to which array of SRS names to use within
@@ -294,7 +296,7 @@
     },
 
     onViewRequested() {
-      const variant = state.getVariantSettingWithDefault;
+      const variant = state.variantWithDefault;
       if (variant == "topStatsBar") {
         this.onViewRequestedTopBarVariant();
       } else if (variant == "underItem") {
@@ -307,7 +309,6 @@
     // ------------------------------------------------------------------------------------------
 
     onViewRequestedItemVariant() {
-      console.log("onViewRequestedItemVariant");
       const textColour = TEXT_COLOR.get(state.review.subject.type);
 
       const currentSrsContentDiv = document.querySelector(
@@ -387,7 +388,6 @@
       const div = document.querySelector(
         ".character-header__current-srs-container"
       );
-      console.log("Item variant div", div);
       if (div) {
         div.dataset.hidden = "true";
       }
@@ -398,7 +398,6 @@
     // ------------------------------------------------------------------------------------------
 
     onViewRequestedTopBarVariant() {
-      console.log("onViewRequestedTopBarVariant");
       const currentSrsContainerDiv = document.querySelector(
         `div[id='top-current-srs-stage-container']`
       );
@@ -415,7 +414,6 @@
     appendNewSrsContainerTopBarVariant() {
       const { iconHtml, srsStageName } = state.review.currentIndicator;
 
-      console.log("appendNewSrsContainerTopBarVariant");
       // Copying the structure and style classes of existing WaniKani statistics header.
       const container = document.createElement("div");
       container.className = "quiz-statistics__item";
@@ -446,7 +444,6 @@
     modifyExistingSrsContainerTopBarVariant(containerDiv) {
       const { iconHtml, srsStageName } = state.review.currentIndicator;
 
-      console.log("modifyExistingSrsContainerTopBarVariant");
       const iconDiv = containerDiv.querySelector(
         `div[class='quiz-statistics__item-count-icon']`
       );
@@ -462,7 +459,6 @@
       const div = document.querySelector(
         `div[id='top-current-srs-stage-container']`
       );
-      console.log("Showing top bar", div);
       if (div) {
         div.style.display = "inline";
       }
@@ -472,7 +468,6 @@
       const div = document.querySelector(
         `div[id='top-current-srs-stage-container']`
       );
-      console.log("Hiding top bar", div);
       if (div) {
         div.style.display = "none";
       }
