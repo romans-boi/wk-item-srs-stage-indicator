@@ -10,6 +10,11 @@
 // @grant        none
 // ==/UserScript==
 
+// "topStatsBar" for top-right variant
+// "underItem" for the under the item variant
+// "none" to turn off the current-SRS indicator
+const REVIEW_INDICATOR_VARIANT_DEFAULT = "underItem";
+
 (async function () {
   // ==========================================================================================
   // ------------------------------------------------------------------------------------------
@@ -68,15 +73,28 @@
     underItem: "Under the item",
     topStatsBar: "Top-Right Statistics Bar",
   };
-  const REVIEW_INDICATOR_VARIANT_DEFAULT = "topStatsBar";
 
   const SUBJECT_IDS_WITH_SRS_TARGET = "subjectIdsWithSRS";
 
-  let settings = {};
-
-  let queueElement;
-  let parentElement;
-  let clonedQueueElement;
+  const state = {
+    pageUrl: null,
+    settings: {},
+    review: {
+      subject: {
+        id: null,
+        type: null,
+      },
+      currentIndicator: {
+        iconHtml: null,
+        srsStageName: null,
+      },
+      queueElement: null,
+      clonedQueueElement: null,
+    },
+    get variantWithDefault() {
+      return this.settings.indicatorVariant ?? REVIEW_INDICATOR_VARIANT_DEFAULT;
+    },
+  };
 
   // ==========================================================================================
   // ------------------------------------------------------------------------------------------
@@ -84,100 +102,382 @@
   // ------------------------------------------------------------------------------------------
   // ==========================================================================================
 
-  // Optionally including wkof modules
+  // Optionally including wkof
   if (!window.wkof) {
-    alert(
-      "WaniKani Item SRS Stage Indicator script needs Wanikani Open Framework if you would like " +
-        "to use Settings to switch between indicator variants."
+    console.log(
+      "[Item SRS Stage Indicator] If you would like to use Settings to switch between indicator variants, " +
+      "please install Wanikani Open Framework. Otherwise, you can modify the default variant in the script directly. " +
+      "The default variant is currently for displaying under the item."
     );
   } else {
     wkof.include(WKOF_MODULES);
   }
 
-  // Main event listener for all the page loads
   window.addEventListener("turbo:load", onTurboLoad);
 
-  function onTurboLoad(event) {
+  function onTurboLoad() {
+    state.pageUrl = event.detail.url;
+
+    const runApp = () => {
+      router();
+    };
+
     if (!window.wkof) {
-      initReview(event.detail.url);
+      runApp();
+      return;
+    }
+
+    wkof
+      .ready(WKOF_MODULES)
+      .then(() => wkof.Settings.load(APP_ID))
+      .then(() => {
+        initWkofSettings();
+        runApp();
+      });
+  }
+
+  // ==========================================================================================
+  // ------------------------------------------------------------------------------------------
+  // Router setup for handling correct page setups
+  // ------------------------------------------------------------------------------------------
+  // ==========================================================================================
+
+  function router() {
+    const { pageUrl } = state;
+
+    if (/subjects\/review/.test(pageUrl)) {
+      ReviewPage.init();
     } else {
-      // Wait for wkof modules and settings to be ready, then do all the initialisations
-      wkof
-        .ready(WKOF_MODULES)
-        .then(() => {
-          return wkof.Settings.load(APP_ID);
-        })
-        .then(() => {
-          initWkofSettings();
-          initReview(event.detail.url);
-        });
+      // Nothing to be done at the moment
     }
   }
 
-  function initReview(url) {
-    // If we're not on the review page, then ignore
-    if (!/subjects\/review/.test(url)) return;
+  function onSettingsChangedRouter() {
+    const { pageUrl } = state;
 
-    console.log("Initialising");
-
-    waitForQuizQueue();
-
-    function waitForQuizQueue() {
-      const check = setInterval(() => {
-        const element = document.getElementById("quiz-queue");
-        if (element) {
-          clearInterval(check);
-          setupReviewUi();
-        }
-      }, 50);
+    if (/subjects\/review/.test(pageUrl)) {
+      SrsIndicator.onSettingsChanged();
+    } else {
+      // Nothing to be done at the moment
     }
+  }
 
-    function setupReviewUi() {
-      console.log("setting up review UI");
-      // As recommended by Tofugu Scott: https://community.wanikani.com/t/updates-to-lessons-reviews-and-extra-study/60912/28
-      queueElement = document.getElementById("quiz-queue");
-      parentElement = queueElement.parentElement;
-      clonedQueueElement = queueElement.cloneNode(true);
-      queueElement.remove();
+  // ==========================================================================================
+  // ------------------------------------------------------------------------------------------
+  // Review page 'module' which handles setting up the relevant bits for the review page
+  // ------------------------------------------------------------------------------------------
+  // ==========================================================================================
+
+  const ReviewPage = {
+    async init() {
+      state.review.queueElement = await waitForElement("#quiz-queue");
 
       addStyle();
-      replaceSrsStageNames();
 
-      // If undefined, we use the default value later on. Only 'none' case means to hide the UI.
-      if (settings.indicatorVariant != "none") {
-        console.log("adding listeners");
-        addReviewListeners();
+      QueueManager.init();
+      SrsIndicator.init();
+    },
+  };
+
+  // ==========================================================================================
+  // ------------------------------------------------------------------------------------------
+  // Queue Manager 'module' which handles queue manipulation
+  // ------------------------------------------------------------------------------------------
+  // ==========================================================================================
+
+  const QueueManager = {
+    init() {
+      const queue = state.review.queueElement;
+      const parent = queue.parentElement;
+
+      state.review.clonedQueue = queue.cloneNode(true);
+      queue.remove();
+
+      this.replaceSrsStageNames();
+
+      parent.appendChild(state.review.clonedQueue);
+    },
+
+    replaceSrsStageNames() {
+      // Get the element that holds the SRS names, and replace them with the corrected ones.
+      const srsStagesElement = this.getQuizQueueTarget(
+        SUBJECT_IDS_WITH_SRS_TARGET
+      );
+      const srsStagesText = srsStagesElement.textContent;
+      const srsStagesCorrectedText = srsStagesText.replaceAll(
+        JSON.stringify(CURRENT_NAMES),
+        JSON.stringify(CORRECTED_NAMES)
+      );
+      srsStagesElement.textContent = srsStagesCorrectedText;
+    },
+
+    getQuizQueueTarget(target) {
+      return state.review.clonedQueue.querySelector(
+        `[data-quiz-queue-target="${target}"]`
+      );
+    },
+  };
+
+  // ==========================================================================================
+  // ------------------------------------------------------------------------------------------
+  // SRS Indicator 'module' which manages the indicator UI and any indicator variant changes
+  // ------------------------------------------------------------------------------------------
+  // ==========================================================================================
+
+  const SrsIndicator = {
+    init() {
+      const variant = state.settings.indicatorVariant;
+
+      this.reset();
+
+      if (variant === "none") {
+        return;
+      }
+
+      this.onNextQuestion = this.onNextQuestion.bind(this);
+      this.onDidChangeSrs = this.onDidChangeSrs.bind(this);
+
+      this.addListeners();
+      this.onViewRequested();
+    },
+
+    onSettingsChanged() {
+      // Currently the same as the init(), but this exists for flexibility
+      this.init();
+    },
+
+    reset() {
+      this.hideSrsContainerItemVariant();
+      this.hideSrsContainerTopBarVariant();
+      this.removeListeners();
+    },
+
+    addListeners() {
+      window.addEventListener("didChangeSRS", this.onDidChangeSrs);
+      window.addEventListener("willShowNextQuestion", this.onNextQuestion);
+    },
+
+    removeListeners() {
+      window.removeEventListener("didChangeSRS", this.onDidChangeSrs);
+      window.removeEventListener("willShowNextQuestion", this.onNextQuestion);
+    },
+
+    onDidChangeSrs() {
+      const variant = state.variantWithDefault;
+      if (variant == "topStatsBar") {
+        // Nothing to be done at the moment.
+      } else if (variant == "underItem") {
+        this.hideSrsContainerItemVariant();
+      }
+    },
+
+    onNextQuestion(event) {
+      const subjectId = event.detail.subject.id;
+      const subjectType = event.detail.subject.type;
+
+      // Get SRS stages config
+      const srsStagesJson = JSON.parse(
+        QueueManager.getQuizQueueTarget(SUBJECT_IDS_WITH_SRS_TARGET).textContent
+      );
+
+      const subjectIdSrsList = srsStagesJson.subject_ids_with_srs_info;
+
+      // The tuple we get for a subject looks like this `[id, index, X]` where X is pointing to which array of SRS names to use within
+      // srs_ids_stage_names, but from what I can tell... it doesn't matter? So I just use the local corrected names array for lookup.
+      const currentItemSrsIndex = subjectIdSrsList.find(
+        (subjectSrsInfo) => subjectSrsInfo[0] == subjectId
+      )[1];
+      const currentSrsStageName = CORRECTED_NAMES[currentItemSrsIndex];
+
+      const iconHtml = getIconHtmlFor(currentSrsStageName);
+
+      // Update state
+      state.review.subject.id = subjectId;
+      state.review.subject.type = subjectType;
+      state.review.currentIndicator.iconHtml = iconHtml;
+      state.review.currentIndicator.srsStageName = currentSrsStageName;
+
+      this.onViewRequested();
+    },
+
+    onViewRequested() {
+      const variant = state.variantWithDefault;
+      if (variant == "topStatsBar") {
+        this.onViewRequestedTopBarVariant();
+      } else if (variant == "underItem") {
+        this.onViewRequestedItemVariant();
+      }
+    },
+
+    // ------------------------------------------------------------------------------------------
+    // SRS indicator - under-the-item variant related code
+    // ------------------------------------------------------------------------------------------
+
+    onViewRequestedItemVariant() {
+      const textColour = TEXT_COLOR.get(state.review.subject.type);
+
+      const currentSrsContentDiv = document.querySelector(
+        `div[class='character-header__current-srs-content']`
+      );
+
+      // If doesn't exist, create a new container with the icon and text element, otherwise change icon and text.
+      if (!currentSrsContentDiv) {
+        this.appendNewSrsContainerItemVariant(textColour);
       } else {
-        hideSrsContainerItemVariant();
-        hideSrsContainerTopBarVariant();
-        removeReviewListeners();
+        this.modifyExistingSrsContainerItemVariant(
+          currentSrsContentDiv,
+          textColour
+        );
       }
 
-      parentElement.appendChild(clonedQueueElement);
-    }
-  }
+      this.showSrsContainerItemVariant();
+    },
 
-  function updateReviewUi(url) {
-    // If we're not on the review page, then ignore
-    if (!/subjects\/review/.test(url)) return;
+    appendNewSrsContainerItemVariant(textColour) {
+      const { iconHtml, srsStageName } = state.review.currentIndicator;
 
-    if (settings.indicatorVariant == "none") {
-      hideSrsContainerItemVariant();
-      hideSrsContainerTopBarVariant();
-      removeReviewListeners();
-    } else {
-      console.log('Adding review listeners');
-      addReviewListeners();
+      const container = document.createElement("div");
+      container.className = "character-header__current-srs-container";
+      container.dataset.hidden = "false";
 
-      if (settings.indicatorVariant == "underItem") {
-        console.log('Hiding top bar');
-        hideSrsContainerTopBarVariant();
-      } else if (settings.indicatorVariant == "topStatsBar") {
-        console.log('Hiding item variant');
-        hideSrsContainerItemVariant();
+      const content = document.createElement("div");
+      content.className = "character-header__current-srs-content";
+      content.style.color = textColour;
+
+      const icon = document.createElement("div");
+      icon.className = "character-header__current-srs-icon";
+      icon.innerHTML = iconHtml;
+
+      const text = document.createElement("div");
+      text.className = "character-header__current-srs-text";
+      text.textContent = srsStageName;
+
+      content.appendChild(icon);
+      content.appendChild(text);
+      container.appendChild(content);
+
+      const characterHeader = document.querySelector(
+        `div[class='character-header__content']`
+      );
+
+      characterHeader.appendChild(container);
+    },
+
+    modifyExistingSrsContainerItemVariant(contentDiv, textColour) {
+      const { iconHtml, srsStageName } = state.review.currentIndicator;
+
+      const iconDiv = contentDiv.querySelector(
+        `div[class='character-header__current-srs-icon']`
+      );
+      const textDiv = contentDiv.querySelector(
+        `div[class='character-header__current-srs-text']`
+      );
+
+      iconDiv.innerHTML = iconHtml;
+
+      textDiv.textContent = srsStageName;
+      contentDiv.style.color = textColour;
+    },
+
+    showSrsContainerItemVariant() {
+      const div = document.querySelector(
+        ".character-header__current-srs-container"
+      );
+
+      if (div) {
+        div.dataset.hidden = "false";
       }
-    }
-  }
+    },
+
+    hideSrsContainerItemVariant() {
+      const div = document.querySelector(
+        ".character-header__current-srs-container"
+      );
+      if (div) {
+        div.dataset.hidden = "true";
+      }
+    },
+
+    // ------------------------------------------------------------------------------------------
+    // SRS indicator top-bar-menu variant related code
+    // ------------------------------------------------------------------------------------------
+
+    onViewRequestedTopBarVariant() {
+      const currentSrsContainerDiv = document.querySelector(
+        `div[id='top-current-srs-stage-container']`
+      );
+
+      if (!currentSrsContainerDiv) {
+        this.appendNewSrsContainerTopBarVariant();
+      } else {
+        this.modifyExistingSrsContainerTopBarVariant(currentSrsContainerDiv);
+      }
+
+      this.showSrsContainerTopBarVariant();
+    },
+
+    appendNewSrsContainerTopBarVariant() {
+      const { iconHtml, srsStageName } = state.review.currentIndicator;
+
+      // Copying the structure and style classes of existing WaniKani statistics header.
+      const container = document.createElement("div");
+      container.className = "quiz-statistics__item";
+      container.id = "top-current-srs-stage-container";
+
+      const content = document.createElement("div");
+      content.className = "quiz-statistics__item-count";
+
+      const icon = document.createElement("div");
+      icon.className = "quiz-statistics__item-count-icon";
+      icon.innerHTML = iconHtml;
+
+      const text = document.createElement("div");
+      text.className = "quiz-statistics__item-count-text";
+      text.textContent = srsStageName;
+
+      content.appendChild(icon);
+      content.appendChild(text);
+      container.appendChild(content);
+
+      const statisticsHeader = document.querySelector(
+        `div[class='quiz-statistics']`
+      );
+
+      statisticsHeader.prepend(container);
+    },
+
+    modifyExistingSrsContainerTopBarVariant(containerDiv) {
+      const { iconHtml, srsStageName } = state.review.currentIndicator;
+
+      const iconDiv = containerDiv.querySelector(
+        `div[class='quiz-statistics__item-count-icon']`
+      );
+      const textDiv = containerDiv.querySelector(
+        `div[class='quiz-statistics__item-count-text']`
+      );
+
+      iconDiv.innerHTML = iconHtml;
+      textDiv.textContent = srsStageName;
+    },
+
+    showSrsContainerTopBarVariant() {
+      const div = document.querySelector(
+        `div[id='top-current-srs-stage-container']`
+      );
+      if (div) {
+        div.style.display = "inline";
+      }
+    },
+
+    hideSrsContainerTopBarVariant() {
+      const div = document.querySelector(
+        `div[id='top-current-srs-stage-container']`
+      );
+      if (div) {
+        div.style.display = "none";
+      }
+    },
+  };
 
   // ==========================================================================================
   // ------------------------------------------------------------------------------------------
@@ -193,18 +493,14 @@
       on_click: dialogOpen,
     });
 
-    settings = wkof.settings[APP_ID];
+    state.settings = wkof.settings[APP_ID];
   }
 
   function dialogOpen() {
     const dialog = new wkof.Settings({
       script_id: APP_ID,
       title: APP_TITLE,
-      on_close: (values) => {
-        console.log("on_close");
-        console.log(window.location.href);
-        updateReviewUi(window.location.href);
-      },
+      on_close: onSettingsChangedRouter,
       content: {
         config: {
           type: "group",
@@ -228,314 +524,31 @@
 
   // ==========================================================================================
   // ------------------------------------------------------------------------------------------
-  // Set up for correct SRS stage names
+  // Utils and helpers
   // ------------------------------------------------------------------------------------------
   // ==========================================================================================
 
-  function replaceSrsStageNames() {
-    // Get the element that holds the SRS names, and replace them with the corrected ones.
-    const srsStagesElement = getQuizQueueTarget(SUBJECT_IDS_WITH_SRS_TARGET);
-    const srsStagesText = srsStagesElement.textContent;
-    const srsStagesCorrectedText = srsStagesText.replaceAll(
-      JSON.stringify(CURRENT_NAMES),
-      JSON.stringify(CORRECTED_NAMES)
-    );
-    srsStagesElement.textContent = srsStagesCorrectedText;
+  function waitForElement(selector, interval = 50) {
+    return new Promise((resolve) => {
+      const handle = setInterval(() => {
+        const element = document.querySelector(selector);
+        if (element) {
+          clearInterval(handle);
+          resolve(element);
+        }
+      }, interval);
+    });
   }
-
-  // ==========================================================================================
-  // ------------------------------------------------------------------------------------------
-  // Event listener setup
-  // ------------------------------------------------------------------------------------------
-  // ==========================================================================================
-
-  function addReviewListeners() {
-    window.addEventListener("didChangeSRS", onDidChangeSrs);
-    window.addEventListener("willShowNextQuestion", onNextQuestion);
-  }
-
-  function removeReviewListeners() {
-    window.removeEventListener("didChangeSRS", onDidChangeSrs);
-    window.removeEventListener("willShowNextQuestion", onNextQuestion);
-  }
-
-  function onDidChangeSrs() {
-    const variant = getVariantSettingWithDefault();
-    if (variant == "topStatsBar") {
-      // Nothing to be done at the moment.
-    } else if (variant == "underItem") {
-      hideSrsContainerItemVariant();
-    }
-  }
-
-  function onNextQuestion(event) {
-    const subject = event.detail.subject;
-    const currentItemId = subject.id;
-
-    // Get SRS stages config
-    const srsStagesJson = JSON.parse(
-      getQuizQueueTarget(SUBJECT_IDS_WITH_SRS_TARGET).textContent
-    );
-    const subjectIdSrsList = srsStagesJson.subject_ids_with_srs_info;
-
-    // The tuple we get for a subject looks like this `[id, index, X]` where X is pointing to which array of SRS names to use within
-    // srs_ids_stage_names, but from what I can tell... it doesn't matter? So I just use the local corrected names array for lookup.
-    const currentItemSrsIndex = subjectIdSrsList.find(
-      (subjectSrsInfo) => subjectSrsInfo[0] == currentItemId
-    )[1];
-    const currentSrsStageName = CORRECTED_NAMES[currentItemSrsIndex];
-
-    const iconHtml = getIconHtmlFor(currentSrsStageName);
-
-    const variant = getVariantSettingWithDefault();
-    if (variant == "topStatsBar") {
-      onViewRequestedTopBarVariant(iconHtml, currentSrsStageName);
-    } else if (variant == "underItem") {
-      onViewRequestedItemVariant(subject.type, iconHtml, currentSrsStageName);
-    }
-  }
-
-  // ==========================================================================================
-  // ------------------------------------------------------------------------------------------
-  // SRS indicator under the item
-  // ------------------------------------------------------------------------------------------
-  // ==========================================================================================
-
-  function onViewRequestedItemVariant(
-    subjectType,
-    iconHtml,
-    currentSrsStageName
-  ) {
-    console.log('onViewRequestedItemVariant')
-    const textColour = TEXT_COLOR.get(subjectType);
-
-    const currentSrsContentDiv = document.querySelector(
-      `div[class='character-header__current-srs-content']`
-    );
-
-    // If doesn't exist, create a new container with the icon and text element, otherwise change icon and text.
-    if (currentSrsContentDiv == undefined) {
-      appendNewSrsContainerItemVariant(
-        textColour,
-        iconHtml,
-        currentSrsStageName
-      );
-    } else {
-      modifyExistingSrsContainerItemVariant(
-        currentSrsContentDiv,
-        textColour,
-        iconHtml,
-        currentSrsStageName
-      );
-    }
-
-    showSrsContainerItemVariant();
-  }
-
-  function showSrsContainerItemVariant() {
-    const div = document.querySelector(
-      ".character-header__current-srs-container"
-    );
-    if (div != undefined) {
-      div.dataset.hidden = "false";
-    }
-  }
-
-  function hideSrsContainerItemVariant() {
-    const div = document.querySelector(
-      ".character-header__current-srs-container"
-    );
-    console.log("Item variant div", div);
-    if (div != undefined) {
-      div.dataset.hidden = "true";
-    }
-  }
-
-  function appendNewSrsContainerItemVariant(
-    textColour,
-    iconHtml,
-    currentSrsStageName
-  ) {
-    const container = document.createElement("div");
-    container.className = "character-header__current-srs-container";
-    container.dataset.hidden = "false";
-
-    const content = document.createElement("div");
-    content.className = "character-header__current-srs-content";
-    content.style.color = textColour;
-
-    const icon = document.createElement("div");
-    icon.className = "character-header__current-srs-icon";
-    if (iconHtml == null) {
-      icon.hidden = "true";
-    } else {
-      icon.innerHTML = iconHtml;
-    }
-
-    const text = document.createElement("div");
-    text.className = "character-header__current-srs-text";
-    text.textContent = currentSrsStageName;
-
-    content.appendChild(icon);
-    content.appendChild(text);
-    container.appendChild(content);
-
-    const characterHeader = document.querySelector(
-      `div[class='character-header__content']`
-    );
-
-    characterHeader.appendChild(container);
-  }
-
-  function modifyExistingSrsContainerItemVariant(
-    contentDiv,
-    textColour,
-    iconHtml,
-    currentSrsStageName
-  ) {
-    const iconDiv = contentDiv.querySelector(
-      `div[class='character-header__current-srs-icon']`
-    );
-    const textDiv = contentDiv.querySelector(
-      `div[class='character-header__current-srs-text']`
-    );
-
-    if (iconHtml == null) {
-      iconDiv.hidden = "true";
-    } else {
-      iconDiv.innerHTML = iconHtml;
-    }
-    textDiv.textContent = currentSrsStageName;
-    contentDiv.style.color = textColour;
-  }
-
-  // ==========================================================================================
-  // ------------------------------------------------------------------------------------------
-  // SRS indicator in top bar menu
-  // ------------------------------------------------------------------------------------------
-  // ==========================================================================================
-
-  function onViewRequestedTopBarVariant(iconHtml, currentSrsStageName) {
-    console.log('onViewRequestedTopBarVariant')
-    const currentSrsContainerDiv = document.querySelector(
-      `div[id='top-current-srs-stage-container']`
-    );
-
-    if (currentSrsContainerDiv == undefined) {
-      appendNewSrsContainerTopBarVariant(iconHtml, currentSrsStageName);
-    } else {
-      modifyExistingSrsContainerTopBarVariant(
-        currentSrsContainerDiv,
-        iconHtml,
-        currentSrsStageName
-      );
-    }
-
-    showSrsContainerTopBarVariant();
-  }
-
-  function appendNewSrsContainerTopBarVariant(iconHtml, currentSrsStageName) {
-    console.log('appendNewSrsContainerTopBarVariant')
-    // Copying the structure and style classes of existing WaniKani statistics header.
-    const container = document.createElement("div");
-    container.className = "quiz-statistics__item";
-    container.id = "top-current-srs-stage-container";
-
-    const content = document.createElement("div");
-    content.className = "quiz-statistics__item-count";
-
-    const icon = document.createElement("div");
-    icon.className = "quiz-statistics__item-count-icon";
-    if (iconHtml == null) {
-      icon.hidden = "true";
-    } else {
-      icon.innerHTML = iconHtml;
-    }
-
-    const text = document.createElement("div");
-    text.className = "quiz-statistics__item-count-text";
-    text.textContent = currentSrsStageName;
-
-    content.appendChild(icon);
-    content.appendChild(text);
-    container.appendChild(content);
-
-    const statisticsHeader = document.querySelector(
-      `div[class='quiz-statistics']`
-    );
-
-    statisticsHeader.prepend(container);
-  }
-
-  function modifyExistingSrsContainerTopBarVariant(
-    containerDiv,
-    iconHtml,
-    currentSrsStageName
-  ) {
-    console.log('modifyExistingSrsContainerTopBarVariant')
-    const iconDiv = containerDiv.querySelector(
-      `div[class='quiz-statistics__item-count-icon']`
-    );
-    const textDiv = containerDiv.querySelector(
-      `div[class='quiz-statistics__item-count-text']`
-    );
-
-    if (iconHtml == null) {
-      iconDiv.hidden = "true";
-    } else {
-      iconDiv.innerHTML = iconHtml;
-    }
-    textDiv.textContent = currentSrsStageName;
-  }
-
-  function showSrsContainerTopBarVariant() {
-    const div = document.querySelector(
-      `div[id='top-current-srs-stage-container']`
-    );
-    console.log("Showing top bar", div);
-    if (div != undefined) {
-      div.style.display = "inline";
-    }
-  }
-
-  function hideSrsContainerTopBarVariant() {
-    const div = document.querySelector(
-      `div[id='top-current-srs-stage-container']`
-    );
-    console.log("Hiding top bar", div);
-    if (div != undefined) {
-      div.style.display = "none";
-    }
-  }
-
-  // ==========================================================================================
-  // ------------------------------------------------------------------------------------------
-  // Random helpers
-  // ------------------------------------------------------------------------------------------
-  // ==========================================================================================
 
   function getIconHtmlFor(srsStage) {
     const iconRef = STAGE_TO_ICON_MAP.get(srsStage);
-    if (iconRef == undefined) return null;
+    if (!iconRef) return "";
 
     return `
       <svg class="wk-icon wk-icon--current-srs" viewBox="0 0 512 512" aria-hidden="true">
         <use href="${iconRef}"></use>
       </svg>
     `;
-  }
-
-  function getQuizQueueTarget(target) {
-    return clonedQueueElement.querySelector(
-      `[data-quiz-queue-target="${target}"]`
-    );
-  }
-
-  function getVariantSettingWithDefault() {
-    const variant = settings.indicatorVariant;
-    return typeof variant === "undefined"
-      ? REVIEW_INDICATOR_VARIANT_DEFAULT
-      : variant;
   }
 
   // ==========================================================================================
