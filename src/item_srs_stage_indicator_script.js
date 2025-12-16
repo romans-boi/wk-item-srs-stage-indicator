@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WaniKani Item SRS Stage Indicator
 // @namespace    http://tampermonkey.net/
-// @version      1.5.1
+// @version      1.5.2
 // @description  Displays the exact item SRS stage (Apprentice IV, Guru I, etc.), both before and after completing a review for the item.
 // @author       romans-boi
 // @license      MIT
@@ -273,7 +273,7 @@ const REVIEW_INDICATOR_VARIANT_DEFAULT = "underItem";
 
     onNextQuestion(event) {
       const subjectId = event.detail.subject.id;
-      const subjectType = event.detail.subject.type;
+      const subjectType = event.detail.subject.subject_category;
 
       // Get SRS stages config
       const srsStagesJson = JSON.parse(
