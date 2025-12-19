@@ -60,7 +60,13 @@ const REVIEW_INDICATOR_VARIANT_DEFAULT = "underItem";
     ["Guru II", "#wk-icon__srs-guru6"],
     ["Master", "#wk-icon__srs-master"],
     ["Enlightened", "#wk-icon__srs-enlightened"],
+    ["Burned", "#wk-icon__srs-burned"],
   ]);
+
+  // Reverse the above map for item detail pages
+  const ICON_TO_STAGE_MAP = new Map(
+    Array.from(STAGE_TO_ICON_MAP, (a) => a.reverse())
+  );
 
   const TEXT_COLOR = new Map([
     ["Radical", "#a1dfff"],
@@ -106,8 +112,8 @@ const REVIEW_INDICATOR_VARIANT_DEFAULT = "underItem";
   if (!window.wkof) {
     console.log(
       "[Item SRS Stage Indicator] If you would like to use Settings to switch between indicator variants, " +
-      "please install Wanikani Open Framework. Otherwise, you can modify the default variant in the script directly. " +
-      "The default variant is currently for displaying under the item."
+        "please install Wanikani Open Framework. Otherwise, you can modify the default variant in the script directly. " +
+        "The default variant is currently for displaying under the item."
     );
   } else {
     wkof.include(WKOF_MODULES);
@@ -150,6 +156,11 @@ const REVIEW_INDICATOR_VARIANT_DEFAULT = "underItem";
     } else {
       // Nothing to be done at the moment
     }
+
+    // Subject details page
+    if (/(radicals|kanji|vocabulary)\//.test(pageUrl)) {
+      SubjectDetailsPage.init();
+    }
   }
 
   function onSettingsChangedRouter() {
@@ -176,6 +187,42 @@ const REVIEW_INDICATOR_VARIANT_DEFAULT = "underItem";
 
       QueueManager.init();
       SrsIndicator.init();
+    },
+  // ==========================================================================================
+  // ------------------------------------------------------------------------------------------
+  // Subject Details Page 'module' which handles setting up SRS indicator UI for details page
+  // ------------------------------------------------------------------------------------------
+  // ==========================================================================================
+
+  const SubjectDetailsPage = {
+    async init() {
+      const pageHeaderPrefix = await waitForElement(
+        ".page-header__prefix",
+        (interval = 50)
+      );
+      const character = pageHeaderPrefix.querySelector(".subject-character");
+
+      // Only an unlocked character needs changing
+      if ([...character.classList].includes("subject-character--unlocked")) {
+        this.changeSrsText();
+      }
+    },
+
+    changeSrsText() {
+      const container = document.querySelector(".subject-progress__srs");
+      const imageWrapper = container.querySelector(
+        ".subject-progress__srs-image-wrapper"
+      );
+      const textDiv = container.querySelector(".subject-progress__srs-title");
+
+      // Take the icon href name, and use that to look up the corrected SRS stage name.
+      // Hacky? Absolutely. But the content is rendered server-side, so I don't have
+      // the relevant item object at hand to inspect. And I don't want to call the API to get it -
+      // more hassle than this is worth.
+      const iconRef = imageWrapper.children[0].children[0].href.baseVal;
+      const newSrsStageName = ICON_TO_STAGE_MAP.get(iconRef);
+
+      textDiv.textContent = newSrsStageName;
     },
   };
 
